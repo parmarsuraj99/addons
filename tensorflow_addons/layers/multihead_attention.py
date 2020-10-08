@@ -296,3 +296,52 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         )
 
         return config
+
+def elu_feature_map(x):
+    return tf.keras.activations.elu(x) + 1
+
+
+class LinearAttention(MultiHeadAttention):
+
+    def __init__(self, eps=1e-6, **kwargs):
+        super(LinearAttention, self).__init__(**kwargs)
+        self.feature_map = elu_feature_map
+        self.eps = eps
+
+    def _compute_attention(
+        self,
+        query,
+        key,
+        value,
+        attention_mask=None,
+        ):
+        """Applies Dot-product attention with query, key, value tensors.
+        This function defines the computation inside `call` with projected
+        multi-head Q, K, V inputs. Users can override this function for customized
+        attention implementation.
+        Args:
+            query: Projected query `Tensor` of shape `[B, T, N, key_dim]`.
+            key: Projected key `Tensor` of shape `[B, T, N, key_dim]`.
+            value: Projected value `Tensor` of shape `[B, T, N, value_dim]`.
+            attention_mask: a boolean mask of shape `[B, T, S]`, that prevents
+            attention to certain positions.
+        Returns:
+            attention_output: Multi-headed outputs of attention computation.
+            attention_scores: Multi-headed attention weights.
+        """
+
+        query_map = self.feature_map(query)
+        key_map = self.feature_map(key)
+
+        #TODO: Add mask
+
+        key_value = special_math_ops.einsum('nshd,nshm->nhmd', key_map,
+                value)
+
+        Z = 1.0 / (special_math_ops.einsum('nlhd,nhd->nlh', query_map,
+                   tf.reduce_sum(key_map, axis=1)) + self.eps)
+
+        attention_output = special_math_ops.einsum('nlhd,nhmd,nlh->nlhm'
+                , query_map, key_value, Z)
+
+        return (attention_output, Z)
